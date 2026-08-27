@@ -17,7 +17,6 @@ ignore:
   - CONTRIBUTING.md
   - GITHUB_SETUP_GUIDE.md
   - VERSION
-  - LICENSE.md
   - .editorconfig
   - .gitattributes
   - .gitignore
