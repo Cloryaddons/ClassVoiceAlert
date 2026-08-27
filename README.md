@@ -122,7 +122,7 @@ GitHub 仓库中的源码目录主要用于开发，不建议普通用户直接�
 - [`docs/API.md`](docs/API.md)
 - [`docs/MODULE_DEVELOPMENT.md`](docs/MODULE_DEVELOPMENT.md)
 - [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md)
-- [`CONTRIBUTING.md`](docs/CONTRIBUTING.md)
+- [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)
 
 ## Author
 
@@ -134,4 +134,4 @@ GitHub 仓库中的源码目录主要用于开发，不建议普通用户直接�
 
 你可以在非商业用途下使用、修改和分享本项目；商业用途需要单独获得作者许可。
 
-完整条款请参阅 [`LICENSE.md`](docs/LICENSE.md)。
+完整条款请参阅 [`docs/LICENSE.md`](docs/LICENSE.md)。
