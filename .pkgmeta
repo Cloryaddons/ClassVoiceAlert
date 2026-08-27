@@ -1,0 +1,23 @@
+package-as: ClassVoiceAlert
+
+enable-nolib-creation: no
+
+move-folders:
+  ClassVoiceAlert/addons/ClassVoiceAlertToolbox: ClassVoiceAlertToolbox
+  ClassVoiceAlert/addons/ClassVoiceAlertToolbox_Core: ClassVoiceAlertToolbox_Core
+  ClassVoiceAlert/addons/ClassVoiceAlertToolbox_Module_BoneShield: ClassVoiceAlertToolbox_Module_BoneShield
+  ClassVoiceAlert/addons/ClassVoiceAlertToolbox_Module_DnD: ClassVoiceAlertToolbox_Module_DnD
+
+ignore:
+  - .github
+  - docs
+  - scripts
+  - README.md
+  - CHANGELOG.md
+  - CONTRIBUTING.md
+  - GITHUB_SETUP_GUIDE.md
+  - VERSION
+  - LICENSE.md
+  - .editorconfig
+  - .gitattributes
+  - .gitignore
