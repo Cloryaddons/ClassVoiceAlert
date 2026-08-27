@@ -122,7 +122,7 @@ GitHub 仓库中的源码目录主要用于开发，不建议普通用户直接�
 - [`docs/API.md`](docs/API.md)
 - [`docs/MODULE_DEVELOPMENT.md`](docs/MODULE_DEVELOPMENT.md)
 - [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md)
-- [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- [`CONTRIBUTING.md`](docs/CONTRIBUTING.md)
 
 ## Author
 
