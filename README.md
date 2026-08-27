@@ -127,3 +127,11 @@ GitHub 仓库中的源码目录主要用于开发，不建议普通用户直接�
 ## Author
 
 **Clory**
+
+## 许可证
+
+本项目采用 **PolyForm Noncommercial License 1.0.0**。
+
+你可以在非商业用途下使用、修改和分享本项目；商业用途需要单独获得作者许可。
+
+完整条款请参阅 [`LICENSE.md`](LICENSE.md)。
