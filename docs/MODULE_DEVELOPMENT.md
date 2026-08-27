@@ -1,106 +1,388 @@
-# Module Development Guide
+# Developing a ClassVoiceAlert Module
 
-## Goal
+This document describes the standard process for adding a feature module to ClassVoiceAlert.
 
-A feature module should contain only the logic required to determine **when** an alert should fire.
+Author: **Clory**
 
-Before adding a module, read:
-1. `docs/ARCHITECTURE.md`
-2. `docs/API.md`
-3. `docs/MODULE_TEMPLATE.lua`
-
-## Create a new module
-
-Example: Dancing Rune Weapon.
-
-### 1. Create the physical AddOn
+Before implementing a module, read:
 
 ```text
-addons/ClassVoiceAlertToolbox_Module_DancingRuneWeapon/
-    ClassVoiceAlertToolbox_Module_DancingRuneWeapon.toc
-    DancingRuneWeapon.lua
+docs/ARCHITECTURE.md
+docs/API.md
 ```
 
-### 2. TOC
+---
+
+## 1. Module naming
+
+Every official feature module uses the physical AddOn namespace:
+
+```text
+ClassVoiceAlertToolbox_Module_<ModuleName>
+```
+
+Example:
+
+```text
+ClassVoiceAlertToolbox_Module_DancingRuneWeapon
+```
+
+Do not create new official modules using unrelated physical AddOn names.
+
+---
+
+## 2. Required directory
+
+Example:
+
+```text
+addons/
+└── ClassVoiceAlertToolbox_Module_Example/
+    ├── ClassVoiceAlertToolbox_Module_Example.toc
+    ├── ExampleVoiceAlert.lua
+    └── README.txt
+```
+
+---
+
+## 3. Required TOC
+
+Example:
 
 ```toc
 ## Interface: 120100
-## Title: DancingRuneWeaponVoiceAlert
-## Notes: Dancing Rune Weapon voice alert module for ClassVoiceAlert.
+## Title: ExampleVoiceAlert
+## Notes: Voice alert module for ClassVoiceAlert.
 ## Author: Clory
 ## Version: 0.1.0
+
 ## Dependencies: ClassVoiceAlertToolbox_Core
 ## Group: ClassVoiceAlertToolbox
+
 ## X-ClassVoiceAlert-Module: true
 ## X-ClassVoiceAlert-Class: DEATHKNIGHT
-## X-ClassVoiceAlert-ModuleID: dancingRuneWeapon
-## X-ClassVoiceAlert-ModuleName: 符文刃舞提醒
+## X-ClassVoiceAlert-ModuleID: example
+## X-ClassVoiceAlert-ModuleName: 示例提醒
 
-DancingRuneWeapon.lua
+ExampleVoiceAlert.lua
 ```
 
-The repository version is updated by `scripts/set_version.py`; do not independently version a module.
+Public Blizzard AddOn-list titles must be English.
 
-### 3. Start from the template
+The toolbox's internal user-facing module name may be Chinese.
 
-Copy `docs/MODULE_TEMPLATE.lua` and replace IDs, labels, defaults and trigger logic.
+---
 
-### 4. Declare warning range honestly
+## 4. Bootstrap
 
-If the relevant state can meaningfully exist for 12 seconds:
+Start module Lua with:
 
 ```lua
-minWarnBefore = 0,
-maxWarnBefore = 12,
-warnStep = 1,
+local ADDON_NAME = ...
+
+local CVA = _G.ClassVoiceAlert
+if not CVA or CVA:GetAPIVersion() < 1 then
+    return
+end
 ```
 
-Do not shorten the range merely to simplify the UI.
-
-### 5. Trigger the alert through Core
+Then define stable identifiers:
 
 ```lua
-CVA:PlayAlert(profile, {
-    showError = false,
-    defaultText = "提醒文本",
+local CLASS_ID = "DEATHKNIGHT"
+local MODULE_ID = "example"
+```
+
+Do not change an established `MODULE_ID` after release without a migration plan.
+
+---
+
+## 5. Database
+
+Define only module-specific defaults:
+
+```lua
+local defaults = {
+    enabled = true,
+
+    alerts = {
+        main = {
+            enabled = true,
+            warnBefore = 2,
+
+            mode = "blizzard",
+
+            selectedSound = nil,
+            selectedCustomSound = nil,
+            selectedBlizzardSound = "RAID_WARNING",
+
+            ttsText = "示例提醒",
+        },
+    },
+}
+```
+
+Obtain the database through Core:
+
+```lua
+local db = CVA:GetModuleDB(
+    CLASS_ID,
+    MODULE_ID,
+    defaults
+)
+```
+
+Do not create a new SavedVariables database unless preserving legacy configuration requires temporary migration support.
+
+---
+
+## 6. Warning-time range
+
+If the mechanic can exist for at most 10 seconds:
+
+```lua
+CVA:NormalizeAlertProfile(db.alerts.main, {
+    defaultEnabled = true,
+
+    minWarnBefore = 0,
+    maxWarnBefore = 10,
+    defaultWarnBefore = 2,
+
+    warnStep = 1,
+    defaultText = "示例提醒",
 })
 ```
 
-Do not implement another media backend.
+The maximum value must correspond to the real maximum meaningful lifetime.
 
-## Forbidden duplication in feature modules
+Examples:
 
-Do not add module-local implementations of:
-- `LibSharedMedia-3.0` lookup/caching
-- TTS voice discovery or `SpeakText`
-- Blizzard SoundKit preset registry
-- custom voice provider manifest/browser
-- global sound channel / TTS voice / TTS volume UI
-- sound browser
-- Blizzard Settings registration
-- slash commands
+```text
+30-second aura -> 0-30
+4-second linger -> 0-4
+```
 
-## Polling / performance
+Standard warning time uses integer seconds.
 
-Prefer:
-- game events
-- secure/normal hooks where appropriate
-- Cooldown Manager callbacks
-- bounded delayed retries
+Do not implement custom decimal rounding.
 
-Avoid permanent high-frequency tickers or `OnUpdate` state polling unless there is no event-driven alternative and the reason is documented.
+Core already provides:
 
-## UI
+```lua
+CVA:NormalizeWarningSeconds(...)
+```
 
-Use Core standard UI whenever possible.
+---
 
-If a custom panel is genuinely needed:
-- preserve module -> alert -> detail enable hierarchy;
-- clear EditBox focus before hiding/disabling;
-- do not intercept gameplay keyboard bindings;
-- keep shared TTS voice/volume/channel global.
+## 7. Mechanic implementation
 
-## Pre-commit checklist
+The module should focus on determining:
+
+```text
+Should an alert fire now?
+```
+
+Preferred sources:
+
+- WoW events;
+- secure Blizzard state that is available to AddOns;
+- bounded delayed checks;
+- Blizzard UI hooks where appropriate.
+
+Avoid permanent polling unless necessary.
+
+Never add:
+
+```lua
+while true do
+```
+
+Do not introduce a permanent high-frequency `OnUpdate` or ticker when an event-driven implementation is available.
+
+---
+
+## 8. Triggering an alert
+
+Runtime:
+
+```lua
+local function FireAlert()
+    if not db.enabled then
+        return
+    end
+
+    if not db.alerts.main.enabled then
+        return
+    end
+
+    CVA:PlayAlert(db.alerts.main, {
+        showError = false,
+        defaultText = "示例提醒",
+    })
+end
+```
+
+The module decides when `FireAlert()` is called.
+
+Core decides how the selected sound is played.
+
+---
+
+## 9. Registration
+
+Register after initialization:
+
+```lua
+CVA:RegisterModule({
+    addon = ADDON_NAME,
+
+    requiredCoreAPI = 1,
+
+    classID = CLASS_ID,
+    className = "死亡骑士",
+
+    moduleID = MODULE_ID,
+    moduleName = "示例提醒",
+
+    order = 30,
+
+    description = "达到指定条件时进行语音提醒。",
+    enabledLabel = "启用示例提醒",
+
+    getDB = function()
+        return db
+    end,
+
+    alerts = {
+        {
+            key = "main",
+
+            title = "示例提醒",
+            description = "达到条件时进行提醒。",
+
+            showEnabled = true,
+            showWarnBefore = true,
+
+            minWarnBefore = 0,
+            maxWarnBefore = 10,
+            warnStep = 1,
+
+            defaultText = "示例提醒",
+        },
+    },
+
+    testAlert = function()
+        CVA:PlayAlert(db.alerts.main, {
+            showError = true,
+            defaultText = "示例提醒",
+        })
+    end,
+})
+```
+
+---
+
+## 10. Do not duplicate Core systems
+
+A feature module must not implement its own:
+
+```text
+LibSharedMedia discovery
+TTS voice enumeration
+TTS volume
+global sound channel
+Blizzard SoundKit preset database
+custom voice-pack manifest
+sound browser
+shared alert UI
+Blizzard Settings category
+slash command
+```
+
+If a capability is useful to more than one module, it probably belongs in Core.
+
+---
+
+## 11. Keyboard safety
+
+Feature modules should normally rely entirely on standard Core UI.
+
+If custom UI contains an EditBox:
+
+- disable autofocus;
+- clear focus on Escape;
+- clear focus before hiding;
+- clear focus before disabling;
+- clear focus when the parent panel closes.
+
+Use Core keyboard-focus helpers where available.
+
+Never capture normal gameplay keys merely to implement configuration UI.
+
+---
+
+## 12. Parent-child configuration
+
+If the module is disabled:
+
+```text
+all child controls must become non-interactive
+```
+
+If one alert is disabled:
+
+```text
+its enable checkbox remains interactive
+its detailed controls become non-interactive
+```
+
+Do not delete or reset stored child values when disabling a parent.
+
+---
+
+## 13. User-facing descriptions
+
+Describe what the option does.
+
+Good:
+
+```text
+粘滞凋零即将结束且地板还在时，提醒返回凋零地板。
+```
+
+Avoid exposing implementation details:
+
+```text
+监听 CooldownViewer 188290 的 auraInstance rollover……
+```
+
+Debugging details belong in source comments or development documentation.
+
+---
+
+## 14. Public commands
+
+Do not register:
+
+```text
+/example
+/module
+/test
+/debug
+/status
+```
+
+The suite has one public command:
+
+```text
+/cvat
+```
+
+Testing should be available through the configuration interface when appropriate.
+
+---
+
+## 15. Before committing
 
 Run:
 
@@ -108,19 +390,35 @@ Run:
 python scripts/validate.py
 ```
 
-Then verify in game:
-- `/cvat` opens correctly;
-- AddOn list grouping is correct after a full client restart if TOC metadata changed;
-- module disabled -> child settings are locked;
-- alert disabled -> its detail settings are locked;
-- TTS/search/numeric input does not leave keyboard focus behind;
-- `ESC` and normal keybinds such as `C` work after closing the toolbox;
-- runtime alert behavior is correct in the relevant mechanic cases.
+Then build an installation package:
 
+```bash
+python scripts/package.py
+```
 
-## Public metadata conventions
+Install the generated ZIP into WoW and test the actual packaged output.
 
-- `## Author` MUST be `Clory` for this project.
-- User-facing AddOns-list `## Title` values MUST be English.
-- Feature physical AddOn IDs MUST start with `ClassVoiceAlertToolbox_Module_` so `ClassVoiceAlertToolbox_Core` stays before feature modules in the grouped AddOns list.
-- Chinese names may still be used inside the toolbox UI for class/module navigation; this rule only governs Blizzard-facing AddOn titles and metadata.
+A module is not considered complete merely because its loose source files load successfully.
+
+---
+
+## 16. Module checklist
+
+Before a module is merged:
+
+- physical AddOn name uses `ClassVoiceAlertToolbox_Module_*`;
+- `Author` is `Clory`;
+- Blizzard AddOn-list title is English;
+- dependency points to `ClassVoiceAlertToolbox_Core`;
+- group points to `ClassVoiceAlertToolbox`;
+- module uses Core DB;
+- module uses `CVA:PlayAlert()`;
+- no duplicate LSM/TTS/audio implementation;
+- no public slash command;
+- no Blizzard Settings registration;
+- no unnecessary permanent polling;
+- warning range matches the mechanic's real lifetime;
+- standard parent-child disabling works;
+- keyboard focus remains safe;
+- repository validation passes;
+- packaged ZIP is tested in game.
