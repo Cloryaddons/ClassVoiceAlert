@@ -1,0 +1,14 @@
+## Interface: 120100
+## Title: ClassVoiceAlert Core
+## Notes: Shared core for ClassVoiceAlert modules: database, media, TTS, LSM, registry, and unified UI.
+## Author: Clory
+## Version: 0.1.0
+## Dependencies: ClassVoiceAlertToolbox
+## Group: ClassVoiceAlertToolbox
+## SavedVariables: ClassVoiceAlertDB
+
+Init.lua
+DB.lua
+Media.lua
+UI.lua
+Registry.lua

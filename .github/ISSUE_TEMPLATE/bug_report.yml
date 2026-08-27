@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a reproducible ClassVoiceAlert problem
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: ClassVoiceAlert version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: wow
+    attributes:
+      label: WoW version / Interface
+      placeholder: "12.1 / 120100"
+    validations:
+      required: true
+  - type: dropdown
+    id: module
+    attributes:
+      label: Affected area
+      options:
+        - Root / Settings entry
+        - Core / UI / Audio
+        - Bone Shield
+        - Death and Decay
+        - Other / Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: "1. ...\n2. ...\n3. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: errors
+    attributes:
+      label: Lua errors / logs
+      render: text
+  - type: checkboxes
+    id: isolation
+    attributes:
+      label: Isolation check
+      options:
+        - label: I tested with unrelated AddOns disabled when practical.

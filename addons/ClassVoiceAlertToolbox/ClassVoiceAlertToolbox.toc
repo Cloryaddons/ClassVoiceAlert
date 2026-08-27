@@ -1,0 +1,8 @@
+## Interface: 120100
+## Title: ClassVoiceAlert Toolbox
+## Notes: ClassVoiceAlert suite root. Provides the AddOns-list parent, Blizzard Settings entry, and the single /cvat command.
+## Author: Clory
+## Version: 0.1.0
+## Group: ClassVoiceAlertToolbox
+
+Root.lua

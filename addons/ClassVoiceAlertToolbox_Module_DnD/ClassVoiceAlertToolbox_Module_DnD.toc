@@ -1,0 +1,14 @@
+## Interface: 120100
+## Title: DnDVoiceAlert
+## Notes: Death and Decay / Cleaving Strikes voice alert module for ClassVoiceAlert.
+## Author: Clory
+## Version: 0.1.0
+## Dependencies: ClassVoiceAlertToolbox_Core
+## Group: ClassVoiceAlertToolbox
+## SavedVariables: DnDVoiceAlertDB
+## X-ClassVoiceAlert-Module: true
+## X-ClassVoiceAlert-Class: DEATHKNIGHT
+## X-ClassVoiceAlert-ModuleID: dnd
+## X-ClassVoiceAlert-ModuleName: 凋零地板提醒
+
+DnDVoiceAlert.lua

@@ -1,0 +1,20 @@
+# Build output
+/dist/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Local test copies
+/_retail_/
+/WTF/
+/Cache/
+Logs/
