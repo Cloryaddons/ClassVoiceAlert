@@ -1,147 +1,304 @@
 # ClassVoiceAlert Core API
 
-**Runtime API version:** `1`  
-**Document revision:** `1.0`  
-**Root AddOn:** `ClassVoiceAlertToolbox`  
-**Core AddOn:** `ClassVoiceAlertToolbox_Core`
+Runtime API Version: **1**
 
-This is the compatibility contract for feature modules.
+Project version and Runtime API version are independent.
 
-## Bootstrap
+For example:
+
+```text
+ClassVoiceAlert release: 0.1.0
+CVA.API_VERSION:         1
+```
+
+The release version changes whenever the suite is released.
+
+`CVA.API_VERSION` changes only when the Core introduces a breaking module API change.
+
+---
+
+## 1. Bootstrap
+
+Every feature module begins by obtaining the public Core object:
 
 ```lua
 local ADDON_NAME = ...
+
 local CVA = _G.ClassVoiceAlert
-if not CVA or CVA:GetAPIVersion() < 1 then return end
+if not CVA or CVA:GetAPIVersion() < 1 then
+    return
+end
 ```
 
-Public identity:
+Current public global:
 
 ```lua
-CVA.VERSION      -- Suite/Core display version, currently synchronized with VERSION
-CVA.API_VERSION  -- runtime compatibility integer
-CVA:GetAPIVersion()
+_G.ClassVoiceAlert
 ```
 
-## Database
+Compatibility alias may exist internally, but new modules should use:
 
 ```lua
-CVA:GetDB()
+_G.ClassVoiceAlert
+```
+
+---
+
+## 2. API version
+
+### `CVA:GetAPIVersion()`
+
+Returns the current runtime API version.
+
+Example:
+
+```lua
+if CVA:GetAPIVersion() < 1 then
+    return
+end
+```
+
+A feature module should declare its required version during registration:
+
+```lua
+requiredCoreAPI = 1
+```
+
+---
+
+## 3. Global database
+
+### `CVA:GetDB()`
+
+Returns the complete ClassVoiceAlert persistent database.
+
+Feature modules normally should not manipulate the complete database directly.
+
+Prefer:
+
+```lua
 CVA:GetGlobalDB()
-CVA:GetModuleDB(classID, moduleID, defaults)
-CVA:CopyDefaults(target, defaults)
-CVA:ClampNumber(value, minValue, maxValue, fallback)
-CVA:NormalizeWarningSeconds(value, minValue, maxValue, fallback)
-CVA:NormalizeAlertProfile(profile, spec)
+CVA:GetModuleDB(...)
 ```
 
-Legacy migration helpers:
+---
 
-```lua
-CVA:OfferLegacyGlobalSettings(sourceName, priority, legacy)
-CVA:FinalizeLegacyGlobalMigration()
-```
+### `CVA:GetGlobalDB()`
 
-Core owns:
+Returns shared Core settings.
 
-```lua
-ClassVoiceAlertDB = {
-    schemaVersion = 1,
-    global = {
-        soundChannel = "Master",
-        ttsVoiceID = nil,
-        ttsVolume = 100,
-    },
-    modules = {
-        [classID] = {
-            [moduleID] = {...},
-        },
-    },
-    migrations = {...},
-}
-```
-
-New feature modules should use `CVA:GetModuleDB()` instead of creating new SavedVariables. Legacy SavedVariables may remain temporarily only for migration compatibility.
-
-## Standard alert profile
-
-Core supports the common profile shape:
+Conceptually:
 
 ```lua
 {
-    enabled = true,
-    warnBefore = 5,
-    mode = "blizzard", -- custom | lsm | blizzard | tts
-    selectedSound = nil,
-    selectedCustomSound = nil,
-    selectedBlizzardSound = "RAID_WARNING",
-    ttsText = "提醒文本",
+    soundChannel = "Master",
+    ttsVoiceID = nil,
+    ttsVolume = 100,
 }
 ```
 
-Normalize it with:
+Feature modules must not duplicate these settings.
+
+---
+
+### `CVA:GetModuleDB(classID, moduleID, defaults)`
+
+Returns the persistent database table for a feature module.
+
+Example:
 
 ```lua
-CVA:NormalizeAlertProfile(profile, {
+local CLASS_ID = "DEATHKNIGHT"
+local MODULE_ID = "example"
+
+local defaults = {
+    enabled = true,
+
+    alerts = {
+        main = {
+            enabled = true,
+            warnBefore = 5,
+            mode = "blizzard",
+            selectedSound = nil,
+            selectedCustomSound = nil,
+            selectedBlizzardSound = "RAID_WARNING",
+            ttsText = "示例提醒",
+        },
+    },
+}
+
+local db = CVA:GetModuleDB(
+    CLASS_ID,
+    MODULE_ID,
+    defaults
+)
+```
+
+Persistent location is managed by Core under:
+
+```text
+ClassVoiceAlertDB.modules[classID][moduleID]
+```
+
+Modules should not depend on the physical table layout beyond the public API.
+
+---
+
+## 4. Alert-profile normalization
+
+### `CVA:NormalizeAlertProfile(profile, spec)`
+
+Normalizes a standard alert profile and fills required values.
+
+Example:
+
+```lua
+CVA:NormalizeAlertProfile(db.alerts.main, {
     defaultEnabled = true,
+
     minWarnBefore = 0,
-    maxWarnBefore = 30,
-    defaultWarnBefore = 5,
+    maxWarnBefore = 10,
+    defaultWarnBefore = 2,
+
     warnStep = 1,
-    defaultText = "提醒文本",
+    defaultText = "示例提醒",
 })
 ```
 
-`warnBefore` is stored as an integer. Fractional manual input uses `math.ceil()` and is then clamped to the declared range.
+For new modules:
 
-## Playback
+```text
+warnStep = 1
+```
 
-Every runtime/test alert must use:
+should be used.
+
+The standard UI currently works in integer seconds.
+
+---
+
+## 5. Warning-time normalization
+
+### `CVA:NormalizeWarningSeconds(value, minValue, maxValue, fallback)`
+
+Core owns standard `warnBefore` normalization.
+
+Normalization:
+
+```text
+tonumber
+→ math.ceil
+→ clamp
+```
+
+Example:
 
 ```lua
-CVA:PlayAlert(profile, {
+local seconds = CVA:NormalizeWarningSeconds(
+    value,
+    0,
+    30,
+    5
+)
+```
+
+For range `0-30`:
+
+```text
+-10  -> 0
+50   -> 30
+1.2  -> 2
+3.01 -> 4
+```
+
+If parsing fails, Core retains or restores a valid fallback.
+
+Feature modules must not create a second incompatible parser for standard warning-time fields.
+
+---
+
+## 6. Alert playback
+
+### `CVA:PlayAlert(profile, options)`
+
+This is the standard runtime alert interface.
+
+Example:
+
+```lua
+CVA:PlayAlert(db.alerts.main, {
     showError = false,
-    defaultText = "提醒文本",
+    defaultText = "示例提醒",
 })
 ```
 
-Tests normally use `showError = true`.
-
-Feature modules must not call TTS, `PlaySound`, `PlaySoundFile`, or LSM directly.
-
-## Media discovery
-
-Core-owned APIs:
+For a configuration test button:
 
 ```lua
-CVA:GetLSM()
-CVA:GetLSMSounds()
-CVA:FetchLSMSound(name)
-
-CVA:GetCustomSoundProvider()
-CVA:GetCustomSounds()
-CVA:GetCustomSoundEntry(name)
-
-CVA:GetBlizzardSounds()
-CVA:GetBlizzardSoundEntry(key)
-
-CVA:GetTTSVoices()
-CVA:GetTTSVoice()
-
-CVA:GetAlertSoundLabel(profile)
-CVA:GetAlertSourceStatus(profile)
-CVA:PlayDefaultWarning()
+CVA:PlayAlert(db.alerts.main, {
+    showError = true,
+    defaultText = "示例提醒",
+})
 ```
 
-LSM invariant: only a successful `LibSharedMedia-3.0` lookup may be cached. Never cache nil/failure.
+Runtime alerts should normally use:
 
-## Module registration
+```lua
+showError = false
+```
 
-Register a module once:
+User-initiated tests should normally use:
+
+```lua
+showError = true
+```
+
+Modules must not bypass `CVA:PlayAlert()` with their own TTS, LSM, or SoundKit implementation.
+
+---
+
+## 7. LibSharedMedia
+
+### `CVA:GetLSM()`
+
+Returns the currently available `LibSharedMedia-3.0` object, if available.
+
+Core follows this invariant:
+
+> Cache only successful LSM resolution.
+
+A failed or nil lookup is never permanently cached.
+
+Feature modules must not call `LibStub()` to create their own LSM subsystem.
+
+---
+
+### `CVA:GetLSMSounds()`
+
+Returns sounds currently available through LibSharedMedia.
+
+---
+
+### `CVA:FetchLSMSound(name)`
+
+Resolves a LibSharedMedia sound name to its media path when available.
+
+Feature modules normally do not need these functions directly when using standard Core UI.
+
+---
+
+## 8. Module registration
+
+### `CVA:RegisterModule(descriptor)`
+
+Registers a feature module with the toolbox.
+
+Example:
 
 ```lua
 CVA:RegisterModule({
     addon = ADDON_NAME,
+
     requiredCoreAPI = 1,
 
     classID = "DEATHKNIGHT",
@@ -149,22 +306,30 @@ CVA:RegisterModule({
 
     moduleID = "example",
     moduleName = "示例提醒",
+
     order = 30,
-    description = "用户可读的功能说明。",
+
+    description = "达到指定条件时进行语音提醒。",
     enabledLabel = "启用示例提醒",
 
-    getDB = function() return db end,
+    getDB = function()
+        return db
+    end,
 
     alerts = {
         {
             key = "main",
+
             title = "示例提醒",
             description = "达到条件时进行提醒。",
+
             showEnabled = true,
             showWarnBefore = true,
+
             minWarnBefore = 0,
             maxWarnBefore = 10,
             warnStep = 1,
+
             defaultText = "示例提醒",
         },
     },
@@ -178,73 +343,243 @@ CVA:RegisterModule({
 })
 ```
 
-Registry/navigation APIs:
+---
+
+## 9. Registration fields
+
+### `addon`
+
+Physical AddOn name supplied through:
 
 ```lua
-CVA:GetModule(classID, moduleID)
-CVA:RefreshNavigation()
-CVA:ShowGlobalSettings()
-CVA:ShowModule(classID, moduleID)
-CVA:SelectClass(classID)
-CVA:Open()
-CVA:OpenModule(classID, moduleID)
+local ADDON_NAME = ...
 ```
 
-Feature modules normally only need `CVA:RegisterModule()`.
+---
 
-## Standard UI
+### `requiredCoreAPI`
+
+Minimum compatible runtime API.
+
+Current value:
 
 ```lua
-CVA.UI:BuildStandardModulePanel(parent, descriptor)
-CVA.UI:BuildGlobalPanel(parent)
-CVA.UI:ClearKeyboardFocus(rootFrame)
-CVA:OpenSoundBrowser(profile, source, onChanged)
+1
 ```
 
-Prefer the standard module panel. A custom panel is allowed only for genuinely nonstandard interaction and must preserve:
-- parent -> child enable hierarchy;
-- keyboard-focus safety;
-- shared global audio settings;
-- Core-owned playback/media logic.
+---
 
-## TOC contract
+### `classID`
 
-Feature AddOn folder/TOC naming:
+Stable machine-readable class identifier.
+
+Example:
+
+```lua
+"DEATHKNIGHT"
+```
+
+---
+
+### `className`
+
+User-facing class name used inside the toolbox.
+
+Example:
+
+```lua
+"死亡骑士"
+```
+
+---
+
+### `moduleID`
+
+Stable machine-readable module identifier.
+
+Examples:
 
 ```text
-ClassVoiceAlertToolbox_Module_<ShortModuleName>/
-    ClassVoiceAlertToolbox_Module_<ShortModuleName>.toc
+boneshield
+dnd
 ```
 
-Required TOC metadata:
+Do not change an existing `moduleID` casually because it is part of persistent database identity.
 
-```toc
-## Title: <English AddOns-list name>
-## Author: Clory
-## Dependencies: ClassVoiceAlertToolbox_Core
-## Group: ClassVoiceAlertToolbox
-## X-ClassVoiceAlert-Module: true
-## X-ClassVoiceAlert-Class: <CLASS_ID>
-## X-ClassVoiceAlert-ModuleID: <module_id>
-## X-ClassVoiceAlert-ModuleName: <localized name>
+---
+
+### `moduleName`
+
+User-facing module name inside the toolbox.
+
+This may be localized independently of the English Blizzard AddOn-list title.
+
+---
+
+### `order`
+
+Controls ordering inside the ClassVoiceAlert toolbox.
+
+This is separate from the Blizzard AddOns-list order.
+
+---
+
+### `description`
+
+User-facing explanation of what the module does.
+
+Describe functionality, not internal implementation.
+
+Good:
+
+```text
+白骨之盾即将结束时进行语音提醒。
 ```
 
-Do not register module-local slash commands or Blizzard Settings categories.
+Avoid:
 
-## Mandatory development invariants
+```text
+通过 CDM auraInstanceID rollover 和定时器检查……
+```
 
-1. No duplicate LSM/TTS/custom-provider/Blizzard-sound implementation in feature modules.
-2. No class mechanic or spell ID in Core.
-3. Runtime alerts use `CVA:PlayAlert()`.
-4. Standard module settings use `CVA:GetModuleDB()`.
-5. User-facing descriptions explain behavior, not implementation details.
-6. Avoid permanent polling; prefer events/hooks/bounded retries.
-7. Module/UI code must not leave hidden EditBoxes focused.
-8. Parent-disabled UI must make descendants non-interactive without deleting their settings.
-9. Warning-time range must represent the mechanic's real meaningful maximum lifetime.
-10. Project author metadata belongs to the project maintainer; AI tooling is not listed as `## Author`.
+---
 
+### `enabledLabel`
 
-## Project packaging convention
+Label used for the module's master enable control.
 
-Official feature modules use physical AddOn IDs `ClassVoiceAlertToolbox_Module_<Feature>`, depend on `ClassVoiceAlertToolbox_Core`, and group under `ClassVoiceAlertToolbox`. Blizzard-facing `## Title` and `## Author` metadata are English-title / `Clory` respectively.
+---
+
+### `getDB`
+
+Returns the active module database.
+
+---
+
+### `alerts`
+
+Describes alert sections rendered by the standard Core UI.
+
+---
+
+## 10. Standard alert descriptor
+
+Typical descriptor:
+
+```lua
+{
+    key = "main",
+
+    title = "示例提醒",
+    description = "达到条件时进行提醒。",
+
+    showEnabled = true,
+    showWarnBefore = true,
+
+    minWarnBefore = 0,
+    maxWarnBefore = 10,
+    warnStep = 1,
+
+    defaultText = "示例提醒",
+}
+```
+
+### Warning range
+
+`maxWarnBefore` must reflect the longest meaningful duration of the mechanic.
+
+Examples:
+
+```text
+Bone Shield:
+maxWarnBefore = 30
+
+DnD lingering state:
+maxWarnBefore = 4
+```
+
+Do not reduce the range merely to make the slider shorter.
+
+---
+
+## 11. Standard UI behavior
+
+Modules using the standard Core panel automatically receive:
+
+- module enable control;
+- alert enable control;
+- warning-time slider;
+- manual warning-time input;
+- sound-source selection;
+- TTS text input;
+- sound browser;
+- test button;
+- parent-child enable locking;
+- keyboard-focus protection.
+
+Modules should use standard UI unless they genuinely require behavior that the standard descriptor cannot represent.
+
+---
+
+## 12. Custom UI
+
+A module may provide custom configuration UI only when necessary.
+
+Custom UI must preserve framework behavior.
+
+In particular:
+
+- disabled parents must disable child controls;
+- configuration values must not be destroyed merely because a control is disabled;
+- EditBoxes must not retain hidden keyboard focus;
+- modules must not register extra Blizzard Settings pages;
+- modules must not register extra slash commands;
+- shared audio configuration must remain in Core.
+
+---
+
+## 13. Navigation
+
+Core owns toolbox navigation.
+
+Public user entry point:
+
+```text
+/cvat
+```
+
+Internal Core navigation APIs may open the toolbox or a specific module.
+
+Feature modules must not create separate public commands solely to open their page.
+
+---
+
+## 14. Legacy migration
+
+Core may expose migration helpers for older versions, including legacy global audio settings.
+
+Legacy migration exists only to preserve existing user configuration.
+
+New modules should not design new independent SavedVariables around these migration APIs.
+
+---
+
+## 15. API compatibility
+
+The following does not require increasing `CVA.API_VERSION`:
+
+- adding an optional descriptor field;
+- adding a new helper API;
+- changing documentation;
+- fixing Core implementation bugs;
+- changing UI appearance while preserving module contracts.
+
+A runtime API version increase is appropriate when an existing module written against the previous API can no longer load or behave correctly without source changes.
+
+Example:
+
+```text
+API 1 -> API 2
+```
+
+should be reserved for a genuine breaking contract change.
