@@ -1,16 +1,34 @@
 -- ClassVoiceAlert feature module template
--- Runtime Core API: 1
 --
--- Required physical layout:
--- addons/ClassVoiceAlertToolbox_Module_<ShortModuleName>/
+-- REQUIRED physical AddOn layout:
+--
+-- Interface/AddOns/ClassVoiceAlertToolbox_Module_<ShortModuleName>/
 --   ClassVoiceAlertToolbox_Module_<ShortModuleName>.toc
 --   <ModuleLogic>.lua
 --
--- Required TOC:
+-- REQUIRED TOC metadata:
+--
+-- ## Author: Clory
 -- ## Dependencies: ClassVoiceAlertToolbox_Core
 -- ## Group: ClassVoiceAlertToolbox
 --
--- Module = when to alert. Core = how to store/display/play it.
+-- Public Blizzard AddOn-list titles must be English.
+--
+-- Feature modules:
+-- - MUST use Core DB APIs.
+-- - MUST use CVA:PlayAlert().
+-- - MUST NOT implement their own LSM/TTS/shared audio system.
+-- - MUST NOT register slash commands.
+-- - MUST NOT register Blizzard Settings categories.
+-- - MUST NOT capture normal gameplay keyboard bindings.
+-- - SHOULD prefer events/hooks/bounded retries over permanent polling.
+--
+-- Standard Core UI:
+-- - locks child controls when their parent is disabled;
+-- - provides slider + numeric warning-time input;
+-- - uses integer warning seconds;
+-- - applies ceil() then clamps to the declared valid range;
+-- - handles keyboard focus safety.
 
 local ADDON_NAME = ...
 local CVA = _G.ClassVoiceAlert
