@@ -13,3 +13,15 @@
 - 统一 EditBox 键盘焦点安全处理。
 - 提醒时间支持整数滑杆与手动输入，并执行向上取整与有效范围约束。
 - 建立 GitHub 仓库结构、静态验证、自动打包与 tag Release 工作流。
+
+## 0.1.1
+
+### 修复
+
+- 修复修改 TTS 文本后，关闭设置界面可能导致 `ESC`、`C` 等按键无法正常响应的问题。
+- 修复拖动提醒时间滑条后，关闭设置界面可能残留键盘焦点的问题。
+- 优化设置界面的输入框焦点处理，避免隐藏后的输入控件继续占用键盘输入。
+
+### 调整
+
+- 为 `ClassVoiceAlert Toolbox`、`ClassVoiceAlert Core`、`BoneShieldVoiceAlert` 和 `DnDVoiceAlert` 添加统一的自定义插件图标。
