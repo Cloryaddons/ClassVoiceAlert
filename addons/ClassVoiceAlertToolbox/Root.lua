@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ROOT_VERSION = "0.1.0"
+local ROOT_VERSION = "0.1.1"
 local CORE_ADDON = "ClassVoiceAlertToolbox_Core"
 
 local settingsCategory
