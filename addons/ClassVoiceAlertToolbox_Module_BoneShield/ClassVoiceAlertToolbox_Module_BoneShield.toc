@@ -2,6 +2,7 @@
 ## Title: BoneShieldVoiceAlert
 ## Notes: Bone Shield expiration voice alert module for ClassVoiceAlert.
 ## Author: Clory
+## IconTexture: Interface\AddOns\ClassVoiceAlertToolbox\icon
 ## Version: 0.1.0
 ## Dependencies: ClassVoiceAlertToolbox_Core
 ## Group: ClassVoiceAlertToolbox
