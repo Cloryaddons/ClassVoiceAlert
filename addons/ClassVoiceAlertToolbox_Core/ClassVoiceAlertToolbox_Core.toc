@@ -3,7 +3,7 @@
 ## Notes: Shared core for ClassVoiceAlert modules: database, media, TTS, LSM, registry, and unified UI.
 ## Author: Clory
 ## IconTexture: Interface\AddOns\ClassVoiceAlertToolbox\icon
-## Version: 0.1.2
+## Version: 0.1.3
 ## Dependencies: ClassVoiceAlertToolbox
 ## Group: ClassVoiceAlertToolbox
 ## SavedVariables: ClassVoiceAlertDB

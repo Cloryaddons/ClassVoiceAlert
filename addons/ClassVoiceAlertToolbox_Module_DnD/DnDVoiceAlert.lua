@@ -6,6 +6,7 @@ local PREFIX = "|cffc41e3a[DnDVoiceAlert]|r "
 local CLASS_ID, MODULE_ID = "DEATHKNIGHT", "dnd"
 
 local SPELL_DEATH_AND_DECAY=43265
+local SPELL_CLEAVING_STRIKES=316916
 local AURA_DND_GROUND=43265
 local AURA_CLEAVING_STRIKES=188290
 local GROUND_DURATION=10.0
@@ -28,6 +29,19 @@ local hookedItems=setmetatable({}, {__mode="k"})
 local function Print(msg) DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. tostring(msg)) end
 local function Debug(msg) if db and db.debug then Print("|cffaaaaaaDEBUG:|r " .. tostring(msg)) end end
 local function IsBloodDK() local _,class=UnitClass("player"); if class~="DEATHKNIGHT" then return false end local spec=GetSpecialization(); return spec and GetSpecializationInfo(spec)==250 or false end
+local function HasCleavingStrikes()
+    if C_SpellBook and type(C_SpellBook.IsSpellKnown)=="function" then
+        local ok,known=pcall(C_SpellBook.IsSpellKnown,SPELL_CLEAVING_STRIKES)
+        if ok then return known==true end
+    end
+    if type(IsPlayerSpell)=="function" then
+        local ok,known=pcall(IsPlayerSpell,SPELL_CLEAVING_STRIKES)
+        if ok then return known==true end
+    end
+    -- If the spellbook API cannot be queried, preserve the established
+    -- 4-second behavior rather than generating false immediate alerts.
+    return true
+end
 local function CanRead(value) if canaccessvalue then local ok,r=pcall(canaccessvalue,value); if ok then return r end end if issecretvalue then local ok,s=pcall(issecretvalue,value); if ok then return not s end end return true end
 local function SafeNumber(value) if value==nil or not CanRead(value) then return nil end return type(value)=="number" and value or nil end
 local function CancelTimer(key) local timer=timers[key]; if timer and timer.Cancel then timer:Cancel() end timers[key]=nil end
@@ -68,8 +82,9 @@ local function ResetRuntime(reason)
     Debug("ResetRuntime: "..tostring(reason)); CancelAllTimers()
     state.groundActive=false; state.groundStart=nil; state.groundExpire=nil; state.insideGround=false; state.benefitObserved=false; state.stickyActive=false; state.stickyStart=nil; state.stickyExpire=nil; state.stickySource=nil; state.enterWarned=false; state.recastWarned=false; state.pendingRolloverAt=nil; state.lastBenefitClearAt=nil
 end
-local function FireEnterWarning(reason)
-    if state.enterWarned or not db.enabled or not IsBloodDK() or not state.groundActive or not state.stickyActive or state.insideGround then return end
+local function FireEnterWarning(reason,allowWithoutSticky)
+    if state.enterWarned or not db.enabled or not IsBloodDK() or not state.groundActive or state.insideGround then return end
+    if not state.stickyActive and not allowWithoutSticky then return end
     local p=GetProfile("enter"); if not p or not p.enabled then return end state.enterWarned=true; Debug("ENTER warning: "..tostring(reason)); PlayProfile("enter",false)
 end
 local function FireRecastWarning(reason)
@@ -92,13 +107,39 @@ local function OnStickyExpired()
     state.stickyActive=false; state.stickyStart=nil; state.stickyExpire=nil; state.stickySource=nil; state.insideGround=false; state.benefitObserved=false; CancelTimer("enterWarn"); CancelTimer("recastWarn")
 end
 local function StartSticky(startTime,source)
-    startTime=tonumber(startTime) or GetTime(); state.stickyActive=true; state.stickyStart=startTime; state.stickyExpire=startTime+STICKY_DURATION; state.stickySource=source; state.insideGround=false; state.benefitObserved=true; state.enterWarned=false; state.recastWarned=false
+    startTime=tonumber(startTime) or GetTime()
+    state.insideGround=false; state.benefitObserved=true; state.enterWarned=false; state.recastWarned=false
+
+    if not HasCleavingStrikes() then
+        ClearStickyRuntime("Cleaving Strikes not talented")
+        state.insideGround=false
+        state.benefitObserved=true
+        if state.groundActive then
+            FireEnterWarning("exit without Cleaving Strikes",true)
+        else
+            FireRecastWarning("ground ended without Cleaving Strikes")
+        end
+        return
+    end
+
+    state.stickyActive=true; state.stickyStart=startTime; state.stickyExpire=startTime+STICKY_DURATION; state.stickySource=source
     CancelTimer("stickyExpire"); timers.stickyExpire=C_Timer.NewTimer(math.max(0,state.stickyExpire-GetTime()),OnStickyExpired); Debug(string.format("Sticky start %.3f -> %.3f (%s)",startTime,state.stickyExpire,tostring(source))); ScheduleWarningForCurrentPhase()
 end
 local function OnReenteredGround(reason) if not state.groundActive then return end if state.insideGround and not state.stickyActive then return end Debug("Re-enter ground: "..tostring(reason)); state.insideGround=true; state.benefitObserved=true; state.pendingRolloverAt=nil; ClearStickyRuntime("re-enter") end
 local function OnGroundExpired(expectedExpire)
     timers.ground=nil; if not state.groundActive then return end if expectedExpire and state.groundExpire and math.abs(expectedExpire-state.groundExpire)>0.01 then return end
     state.groundActive=false; state.pendingRolloverAt=nil; CancelTimer("rolloverConfirm"); CancelTimer("enterWarn")
+
+    -- Without Cleaving Strikes there is no 4-second grace period. The DnD
+    -- bonus ends with the ground effect, so recast warning must fire now.
+    if not HasCleavingStrikes() then
+        ClearStickyRuntime("ground expired without Cleaving Strikes")
+        state.insideGround=false
+        state.benefitObserved=false
+        FireRecastWarning("ground expired without Cleaving Strikes")
+        return
+    end
+
     if state.stickyActive then ScheduleWarningForCurrentPhase(); return end
     if state.insideGround or state.benefitObserved then StartSticky(state.groundExpire or GetTime(),"ground_expire"); return end
     FireRecastWarning("ground expired without sticky")
