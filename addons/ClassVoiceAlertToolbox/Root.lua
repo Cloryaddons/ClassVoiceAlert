@@ -61,9 +61,10 @@ local function CreateSettingsPanel()
     openButton:SetSize(210, 32)
     openButton:SetText("打开设置面板")
     openButton:SetScript("OnClick", function()
-        if SettingsPanel and SettingsPanel:IsShown() then
-            SettingsPanel:Hide()
-        end
+        -- Do not call SettingsPanel:Hide() here.
+        -- Blizzard owns the lifecycle of the Settings panel. Hiding it directly
+        -- can leave its managed UI state inconsistent and interfere with ESC.
+        -- Keep the Blizzard Settings window open underneath the toolbox instead.
         OpenToolbox()
     end)
 
@@ -72,28 +73,42 @@ local function CreateSettingsPanel()
         if core then
             local count = 0
             for _, modules in pairs(core.modules or {}) do
-                for _ in pairs(modules) do count = count + 1 end
+                for _ in pairs(modules) do
+                    count = count + 1
+                end
             end
-            coreStatus:SetText(string.format("工具箱核心：|cff00ff00已加载|r    已检测到 %d 个提醒模块。", count))
+            coreStatus:SetText(string.format(
+                "工具箱核心：|cff00ff00已加载|r    已检测到 %d 个提醒模块。",
+                count
+            ))
         else
             coreStatus:SetText("工具箱核心：|cffffaa00尚未加载|r")
         end
     end
 
-    panel:SetScript("OnShow", function(self) self:Refresh() end)
+    panel:SetScript("OnShow", function(self)
+        self:Refresh()
+    end)
+
     settingsPanel = panel
     return panel
 end
 
 local function RegisterBlizzardSettings()
     if settingsCategory then return settingsCategory end
-    if not (Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterAddOnCategory) then
+
+    if not (
+        Settings
+        and Settings.RegisterCanvasLayoutCategory
+        and Settings.RegisterAddOnCategory
+    ) then
         return nil
     end
 
     local panel = CreateSettingsPanel()
     local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
     Settings.RegisterAddOnCategory(category)
+
     settingsCategory = category
     return category
 end
@@ -102,9 +117,13 @@ local bootstrap = CreateFrame("Frame")
 bootstrap:RegisterEvent("PLAYER_LOGIN")
 bootstrap:RegisterEvent("ADDON_LOADED")
 bootstrap:SetScript("OnEvent", function(_, event, loadedAddon)
-    if event == "ADDON_LOADED" and loadedAddon ~= ADDON_NAME then return end
+    if event == "ADDON_LOADED" and loadedAddon ~= ADDON_NAME then
+        return
+    end
+
     RegisterBlizzardSettings()
 end)
+
 RegisterBlizzardSettings()
 
 SLASH_CLASSVOICEALERTTOOLBOX1 = "/cvat"
