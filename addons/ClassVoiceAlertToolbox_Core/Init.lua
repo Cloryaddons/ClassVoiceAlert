@@ -5,7 +5,7 @@ _G.ClassVoiceAlert = CVA
 _G.ClassVoiceAlertToolbox = CVA -- compatibility alias for 0.1.x modules
 
 CVA.ADDON_NAME = ADDON_NAME
-CVA.VERSION = "0.1.1"
+CVA.VERSION = "0.1.2"
 CVA.API_VERSION = 1
 CVA.modules = CVA.modules or {}
 CVA.classInfo = CVA.classInfo or {}
