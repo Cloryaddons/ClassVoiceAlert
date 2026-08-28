@@ -25,3 +25,15 @@
 ### 调整
 
 - 为 `ClassVoiceAlert Toolbox`、`ClassVoiceAlert Core`、`BoneShieldVoiceAlert` 和 `DnDVoiceAlert` 添加统一的自定义插件图标。
+
+## 0.1.2
+
+### 修复
+
+- 修复通过 `ESC -> 选项 -> 插件 -> ClassVoiceAlert Toolbox` 打开工具箱后，`ESC` 键可能无法正常响应的问题。
+- 调整 Blizzard 设置入口的窗口处理方式，避免干扰系统界面状态。
+
+### 说明
+
+- 本次更新不涉及提醒逻辑或模块机制调整。
+- `/cvat` 打开工具箱的方式保持不变。
