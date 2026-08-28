@@ -377,16 +377,35 @@ function UI:BuildStandardModulePanel(parent, descriptor)
             local text = type(profile.ttsText) == "string" and profile.ttsText or alertSpec.defaultText or "提醒"
             w.tts:SetText(text); w.tts:SetCursorPosition(0); w.tts:SetTextColor(1,1,1,1)
         end
-        local function SaveTTS()
-            local text = strtrim(w.tts:GetText() or "")
+        local function SaveTTS(self)
+            local editBox = self or w.tts
+            local text = strtrim(editBox:GetText() or "")
             if text == "" then text = alertSpec.defaultText or "提醒" end
-            profile.ttsText = text; RefreshTTS()
+            profile.ttsText = text
             if type(descriptor.onAlertChanged) == "function" then descriptor.onAlertChanged(alertSpec.key, "ttsText", text) end
         end
         w.tts:SetScript("OnShow", RefreshTTS)
-        w.tts:SetScript("OnEnterPressed", function(self) SaveTTS(); self:ClearFocus() end)
-        w.tts:SetScript("OnEditFocusLost", SaveTTS)
-        w.tts:SetScript("OnEscapePressed", function(self) self:ClearFocus(); RefreshTTS() end)
+        w.tts:SetScript("OnEnterPressed", function(self)
+            -- Focus loss is the single save path. Do not rewrite the EditBox
+            -- while it is still focused; doing so can leave keyboard focus in
+            -- an inconsistent state after the settings panel is hidden.
+            self:ClearFocus()
+        end)
+        w.tts:SetScript("OnEditFocusLost", function(self)
+            SaveTTS(self)
+        end)
+        w.tts:SetScript("OnEscapePressed", function(self)
+            self:ClearFocus()
+            RefreshTTS()
+        end)
+        w.tts:SetScript("OnHide", function(self)
+            -- Last-resort safety for parent/page hides: a hidden EditBox must
+            -- never retain keyboard focus, otherwise ESC/C and other game
+            -- keybinds can continue to be consumed after closing the toolbox.
+            if type(GetCurrentKeyBoardFocus) == "function" and GetCurrentKeyBoardFocus() == self then
+                self:ClearFocus()
+            end
+        end)
 
         w.test = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
         w.test:SetPoint("TOPLEFT", 442, y); w.test:SetSize(82,28); w.test:SetText("测试")
