@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (for example: 0.1.4)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -12,20 +18,35 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout tagged source
+      - name: Checkout release source
         uses: actions/checkout@v7
 
-      - name: Validate tag and source version
+      - name: Resolve and validate release version
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            TAG="v${VERSION}"
+          else
+            TAG="$GITHUB_REF_NAME"
+            VERSION="${TAG#v}"
+          fi
+
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version: $VERSION"
+            exit 1
+          fi
+
           test "$VERSION" = "$(cat VERSION)"
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
           python3 scripts/validate.py
 
       - name: Build install ZIP
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
           python3 scripts/package.py --version "$VERSION"
 
       - name: Create GitHub Release
@@ -33,8 +54,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          gh release create "$GITHUB_REF_NAME" \
-            "dist/ClassVoiceAlertSuite-${VERSION}.zip" \
-            --title "ClassVoiceAlert ${GITHUB_REF_NAME}" \
-            --generate-notes
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            gh release create "$TAG" \
+              "dist/ClassVoiceAlertSuite-${VERSION}.zip" \
+              --target "$GITHUB_SHA" \
+              --title "ClassVoiceAlert $TAG" \
+              --generate-notes
+          else
+            gh release create "$TAG" \
+              "dist/ClassVoiceAlertSuite-${VERSION}.zip" \
+              --title "ClassVoiceAlert $TAG" \
+              --generate-notes
+          fi
