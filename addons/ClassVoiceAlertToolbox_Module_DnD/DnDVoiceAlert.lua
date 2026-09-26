@@ -14,6 +14,12 @@ local STICKY_DURATION=4.0
 local INIT_IGNORE_WINDOW=0.75
 local ROLLOVER_PAIR_WINDOW=0.45
 local GROUND_END_GUARD=0.60
+local STICKY_END_EVENT_GUARD=0.15
+
+local LOC_INSIDE="INSIDE"
+local LOC_OUTSIDE_STICKY="OUTSIDE_STICKY"
+local LOC_OUTSIDE_EMPTY="OUTSIDE_EMPTY"
+
 local BUFF_VIEWER_NAME="BuffIconCooldownViewer"
 local DND_BUFF_COOLDOWN_ID=50002
 
@@ -22,9 +28,23 @@ local defaults={enabled=true,debug=false,alerts={
     recast={enabled=true,warnBefore=1.0,mode="blizzard",selectedSound=nil,selectedCustomSound="凋零没咯",selectedBlizzardSound="RAID_WARNING",ttsText="快补凋零地面"},
 }}
 local db
-local state={groundActive=false,groundStart=nil,groundExpire=nil,insideGround=false,benefitObserved=false,stickyActive=false,stickyStart=nil,stickyExpire=nil,stickySource=nil,enterWarned=false,recastWarned=false,pendingRolloverAt=nil,lastBenefitClearAt=nil}
+local state={
+    groundActive=false,groundStart=nil,groundExpire=nil,
+    location=LOC_OUTSIDE_EMPTY,
+    insideGround=false,benefitObserved=false,
+    stickyActive=false,stickyStart=nil,stickyExpire=nil,stickySource=nil,
+    lastStickyExpiredAt=nil,
+    enterWarned=false,recastWarned=false,
+    pendingRolloverAt=nil,lastBenefitClearAt=nil
+}
 local timers={ground=nil,stickyExpire=nil,enterWarn=nil,recastWarn=nil,rolloverConfirm=nil}
 local hookedItems=setmetatable({}, {__mode="k"})
+
+-- A CLEAR/SET mutation and an UPDATED callback can occur during the same
+-- Blizzard aura-processing pass. Only an UPDATED callback from a later pass
+-- is allowed to mean "the player re-entered DnD".
+local mutationEpoch=0
+local mutationOpen=false
 
 local function Print(msg) DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. tostring(msg)) end
 local function Debug(msg) if db and db.debug then Print("|cffaaaaaaDEBUG:|r " .. tostring(msg)) end end
@@ -80,7 +100,14 @@ local function ClearStickyRuntime(reason)
 end
 local function ResetRuntime(reason)
     Debug("ResetRuntime: "..tostring(reason)); CancelAllTimers()
-    state.groundActive=false; state.groundStart=nil; state.groundExpire=nil; state.insideGround=false; state.benefitObserved=false; state.stickyActive=false; state.stickyStart=nil; state.stickyExpire=nil; state.stickySource=nil; state.enterWarned=false; state.recastWarned=false; state.pendingRolloverAt=nil; state.lastBenefitClearAt=nil
+    state.groundActive=false; state.groundStart=nil; state.groundExpire=nil
+    state.location=LOC_OUTSIDE_EMPTY
+    state.insideGround=false; state.benefitObserved=false
+    state.stickyActive=false; state.stickyStart=nil; state.stickyExpire=nil; state.stickySource=nil
+    state.lastStickyExpiredAt=nil
+    state.enterWarned=false; state.recastWarned=false
+    state.pendingRolloverAt=nil; state.lastBenefitClearAt=nil
+    mutationEpoch=mutationEpoch+1; mutationOpen=false
 end
 local function FireEnterWarning(reason,allowWithoutSticky)
     if state.enterWarned or not db.enabled or not IsBloodDK() or not state.groundActive or state.insideGround then return end
@@ -103,17 +130,41 @@ local function ScheduleWarningForCurrentPhase()
 end
 local function OnStickyExpired()
     timers.stickyExpire=nil; if not state.stickyActive then return end
-    if state.groundActive then FireEnterWarning("sticky expired while ground active") else FireRecastWarning("sticky expired after ground ended") end
-    state.stickyActive=false; state.stickyStart=nil; state.stickyExpire=nil; state.stickySource=nil; state.insideGround=false; state.benefitObserved=false; CancelTimer("enterWarn"); CancelTimer("recastWarn")
+
+    local expiredAt=state.stickyExpire or GetTime()
+
+    if state.groundActive then
+        FireEnterWarning("sticky expired while ground active")
+    else
+        FireRecastWarning("sticky expired after ground ended")
+    end
+
+    state.stickyActive=false
+    state.stickyStart=nil
+    state.stickyExpire=nil
+    state.stickySource=nil
+    state.lastStickyExpiredAt=expiredAt
+    state.location=LOC_OUTSIDE_EMPTY
+    state.insideGround=false
+    state.benefitObserved=false
+
+    CancelTimer("enterWarn")
+    CancelTimer("recastWarn")
 end
 local function StartSticky(startTime,source)
     startTime=tonumber(startTime) or GetTime()
-    state.insideGround=false; state.benefitObserved=true; state.enterWarned=false; state.recastWarned=false
+    state.location=LOC_OUTSIDE_STICKY
+    state.insideGround=false
+    state.benefitObserved=true
+    state.lastStickyExpiredAt=nil
+    state.enterWarned=false
+    state.recastWarned=false
 
     if not HasCleavingStrikes() then
         ClearStickyRuntime("Cleaving Strikes not talented")
+        state.location=LOC_OUTSIDE_EMPTY
         state.insideGround=false
-        state.benefitObserved=true
+        state.benefitObserved=false
         if state.groundActive then
             FireEnterWarning("exit without Cleaving Strikes",true)
         else
@@ -122,10 +173,39 @@ local function StartSticky(startTime,source)
         return
     end
 
-    state.stickyActive=true; state.stickyStart=startTime; state.stickyExpire=startTime+STICKY_DURATION; state.stickySource=source
-    CancelTimer("stickyExpire"); timers.stickyExpire=C_Timer.NewTimer(math.max(0,state.stickyExpire-GetTime()),OnStickyExpired); Debug(string.format("Sticky start %.3f -> %.3f (%s)",startTime,state.stickyExpire,tostring(source))); ScheduleWarningForCurrentPhase()
+    state.stickyActive=true
+    state.stickyStart=startTime
+    state.stickyExpire=startTime+STICKY_DURATION
+    state.stickySource=source
+
+    CancelTimer("stickyExpire")
+    timers.stickyExpire=C_Timer.NewTimer(
+        math.max(0,state.stickyExpire-GetTime()),
+        OnStickyExpired
+    )
+
+    Debug(string.format(
+        "Sticky start %.3f -> %.3f (%s)",
+        startTime,state.stickyExpire,tostring(source)
+    ))
+    ScheduleWarningForCurrentPhase()
 end
-local function OnReenteredGround(reason) if not state.groundActive then return end if state.insideGround and not state.stickyActive then return end Debug("Re-enter ground: "..tostring(reason)); state.insideGround=true; state.benefitObserved=true; state.pendingRolloverAt=nil; ClearStickyRuntime("re-enter") end
+
+local function OnReenteredGround(reason)
+    if not state.groundActive then return end
+    if state.location==LOC_INSIDE and not state.stickyActive then return end
+
+    Debug("Re-enter ground: "..tostring(reason))
+
+    state.pendingRolloverAt=nil
+    CancelTimer("rolloverConfirm")
+    ClearStickyRuntime("re-enter")
+
+    state.location=LOC_INSIDE
+    state.insideGround=true
+    state.benefitObserved=true
+    state.lastStickyExpiredAt=nil
+end
 local function OnGroundExpired(expectedExpire)
     timers.ground=nil; if not state.groundActive then return end if expectedExpire and state.groundExpire and math.abs(expectedExpire-state.groundExpire)>0.01 then return end
     state.groundActive=false; state.pendingRolloverAt=nil; CancelTimer("rolloverConfirm"); CancelTimer("enterWarn")
@@ -140,44 +220,216 @@ local function OnGroundExpired(expectedExpire)
         return
     end
 
-    if state.stickyActive then ScheduleWarningForCurrentPhase(); return end
-    if state.insideGround or state.benefitObserved then StartSticky(state.groundExpire or GetTime(),"ground_expire"); return end
-    FireRecastWarning("ground expired without sticky")
+    if state.stickyActive then
+        ScheduleWarningForCurrentPhase()
+        return
+    end
+
+    if state.location==LOC_INSIDE or state.insideGround then
+        StartSticky(state.groundExpire or GetTime(),"ground_expire")
+        return
+    end
+
+    FireRecastWarning("ground expired while outside with no sticky")
 end
 local function BeginGround(castTime)
-    ResetRuntime("new Death and Decay"); state.groundActive=true; state.groundStart=castTime; state.groundExpire=castTime+GROUND_DURATION; state.insideGround=false; state.benefitObserved=false
+    ResetRuntime("new Death and Decay")
+    state.groundActive=true
+    state.groundStart=castTime
+    state.groundExpire=castTime+GROUND_DURATION
+    state.location=LOC_OUTSIDE_EMPTY
+    state.insideGround=false
+    state.benefitObserved=false
     local expected=state.groundExpire; timers.ground=C_Timer.NewTimer(math.max(0,expected-GetTime()),function() OnGroundExpired(expected) end); Debug(string.format("DnD cast %.3f groundExpire=%.3f",castTime,expected))
 end
 local function OnConfirmedExit(firstAt) if not state.groundActive then return end if state.groundExpire and (state.groundExpire-firstAt)<=GROUND_END_GUARD then return end StartSticky(firstAt,"exit") end
+local function ArmRolloverCandidate(now)
+    state.pendingRolloverAt=now
+    CancelTimer("rolloverConfirm")
+    timers.rolloverConfirm=C_Timer.NewTimer(
+        ROLLOVER_PAIR_WINDOW+0.05,
+        function()
+            timers.rolloverConfirm=nil
+            if state.pendingRolloverAt==now then
+                state.pendingRolloverAt=nil
+            end
+        end
+    )
+end
+
 local function OnBenefitRollover(now)
     if not state.groundActive or not state.groundStart then return end
-    if (now-state.groundStart)<INIT_IGNORE_WINDOW then state.insideGround=true; state.benefitObserved=true; state.pendingRolloverAt=nil; return end
-    if state.groundExpire and (state.groundExpire-now)<=GROUND_END_GUARD then state.pendingRolloverAt=nil; return end
+
+    -- The first benefit rollover after casting confirms that the player is
+    -- actually receiving DnD's benefit. The standalone SET at cast time is not
+    -- enough because DnD may have been placed away from the player.
+    if (now-state.groundStart)<INIT_IGNORE_WINDOW then
+        state.location=LOC_INSIDE
+        state.insideGround=true
+        state.benefitObserved=true
+        state.pendingRolloverAt=nil
+        CancelTimer("rolloverConfirm")
+        Debug("Location -> INSIDE (initial benefit rollover)")
+        return
+    end
+
+    -- Ground-expiry transitions create their own CLEAR/SET activity. The
+    -- 10-second ground timer is authoritative in this short window.
+    if state.groundExpire and (state.groundExpire-now)<=GROUND_END_GUARD then
+        state.pendingRolloverAt=nil
+        CancelTimer("rolloverConfirm")
+        return
+    end
+
+    -- Sticky expiry itself produces a rollover while the ground still exists.
+    -- It is not movement.
+    if state.location==LOC_OUTSIDE_STICKY then
+        if state.stickyExpire and now >= (state.stickyExpire-STICKY_END_EVENT_GUARD) then
+            state.pendingRolloverAt=nil
+            CancelTimer("rolloverConfirm")
+            if state.stickyActive and now >= state.stickyExpire then
+                OnStickyExpired()
+            end
+        end
+        return
+    end
+
+    -- If the local sticky timer fired just before Blizzard delivered its
+    -- matching rollover, ignore that rollover instead of using it as movement.
+    if state.location==LOC_OUTSIDE_EMPTY
+        and state.lastStickyExpiredAt
+        and math.abs(now-state.lastStickyExpiredAt)<=STICKY_END_EVENT_GUARD
+    then
+        state.pendingRolloverAt=nil
+        CancelTimer("rolloverConfirm")
+        return
+    end
+
     local first=state.pendingRolloverAt
-    if first and (now-first)>0 and (now-first)<=ROLLOVER_PAIR_WINDOW then state.pendingRolloverAt=nil; CancelTimer("rolloverConfirm"); OnConfirmedExit(first); return end
-    state.pendingRolloverAt=now; CancelTimer("rolloverConfirm"); timers.rolloverConfirm=C_Timer.NewTimer(ROLLOVER_PAIR_WINDOW+0.05,function() timers.rolloverConfirm=nil; if state.pendingRolloverAt==now then state.pendingRolloverAt=nil end end)
+    if first and (now-first)>0 and (now-first)<=ROLLOVER_PAIR_WINDOW then
+        state.pendingRolloverAt=nil
+        CancelTimer("rolloverConfirm")
+
+        if state.location==LOC_INSIDE then
+            Debug("Location INSIDE -> OUTSIDE_STICKY (double rollover)")
+            OnConfirmedExit(first)
+        elseif state.location==LOC_OUTSIDE_EMPTY then
+            Debug("Location OUTSIDE_EMPTY -> INSIDE (double rollover)")
+            OnReenteredGround("double rollover after sticky expired")
+        end
+        return
+    end
+
+    -- In the trace, both leaving while inside and re-entering after sticky has
+    -- fully expired are represented by TWO rollovers about 0.2-0.3s apart.
+    -- The current stable location tells us which direction the transition goes.
+    if state.location==LOC_INSIDE or state.location==LOC_OUTSIDE_EMPTY then
+        ArmRolloverCandidate(now)
+    end
 end
 
 local function ItemMatchesDnDBuff(item)
-    if not item then return false end local cooldownID=SafeNumber(item.cooldownID); if cooldownID==DND_BUFF_COOLDOWN_ID then return true end
-    local info=item.cooldownInfo; if type(info)=="table" and SafeNumber(info.spellID)==SPELL_DEATH_AND_DECAY then return true end return false
+    if not item then return false end
+    local cooldownID=SafeNumber(item.cooldownID)
+    if cooldownID==DND_BUFF_COOLDOWN_ID then return true end
+    local info=item.cooldownInfo
+    if type(info)=="table" and SafeNumber(info.spellID)==SPELL_DEATH_AND_DECAY then return true end
+    return false
 end
+
+local function IsHookedDnDItem(item)
+    if not item or not hookedItems[item] then return false end
+    local cooldownID=SafeNumber(item.cooldownID)
+    if cooldownID~=nil then return cooldownID==DND_BUFF_COOLDOWN_ID end
+    return true
+end
+
+local function MarkAuraMutation()
+    mutationEpoch=mutationEpoch+1
+    mutationOpen=true
+    local epoch=mutationEpoch
+    C_Timer.After(0,function()
+        if mutationEpoch==epoch then mutationOpen=false end
+    end)
+end
+
 local function HookDnDItem(item)
-    if not item or not ItemMatchesDnDBuff(item) then return false end if hookedItems[item] then return true end hookedItems[item]=true
-    if type(item.OnAuraInstanceInfoCleared)=="function" then hooksecurefunc(item,"OnAuraInstanceInfoCleared",function(self,auraSpellID)
-        if not ItemMatchesDnDBuff(self) then return end auraSpellID=SafeNumber(auraSpellID)
-        if auraSpellID==AURA_CLEAVING_STRIKES then state.lastBenefitClearAt=GetTime() end
-    end) end
-    if type(item.OnAuraInstanceInfoSet)=="function" then hooksecurefunc(item,"OnAuraInstanceInfoSet",function(self,auraSpellID)
-        if not ItemMatchesDnDBuff(self) then return end auraSpellID=SafeNumber(auraSpellID); local now=GetTime()
-        if auraSpellID==AURA_CLEAVING_STRIKES then
-            state.benefitObserved=true; local clearAt=state.lastBenefitClearAt; state.lastBenefitClearAt=nil
-            if clearAt and (now-clearAt)>=0 and (now-clearAt)<=0.08 then OnBenefitRollover(clearAt); return end
-            if state.groundActive and not state.insideGround and not state.stickyActive and state.groundStart and (now-state.groundStart)>=INIT_IGNORE_WINDOW then OnReenteredGround("fresh 188290 SET")
-            elseif state.groundActive and state.groundStart and (now-state.groundStart)<INIT_IGNORE_WINDOW then state.insideGround=true end
-        end
-    end) end
-    if type(item.OnUnitAuraUpdatedEvent)=="function" then hooksecurefunc(item,"OnUnitAuraUpdatedEvent",function(self) if ItemMatchesDnDBuff(self) and state.groundActive and state.stickyActive and not state.insideGround then OnReenteredGround("CDM aura updated") end end) end
+    if not item or not ItemMatchesDnDBuff(item) then return false end
+    if hookedItems[item] then return true end
+    hookedItems[item]=true
+
+    if type(item.OnAuraInstanceInfoCleared)=="function" then
+        hooksecurefunc(item,"OnAuraInstanceInfoCleared",function(self,auraSpellID)
+            if not IsHookedDnDItem(self) then return end
+            MarkAuraMutation()
+
+            local readableAuraSpellID=SafeNumber(auraSpellID)
+            if readableAuraSpellID~=nil
+                and readableAuraSpellID~=AURA_CLEAVING_STRIKES
+            then
+                return
+            end
+
+            state.lastBenefitClearAt=GetTime()
+        end)
+    end
+
+    if type(item.OnAuraInstanceInfoSet)=="function" then
+        hooksecurefunc(item,"OnAuraInstanceInfoSet",function(self,auraSpellID)
+            if not IsHookedDnDItem(self) then return end
+            MarkAuraMutation()
+
+            local now=GetTime()
+            local readableAuraSpellID=SafeNumber(auraSpellID)
+
+            -- Out of combat, use the readable 188290 SET as direct evidence of
+            -- re-entry when we were outside and the sticky has already ended.
+            if readableAuraSpellID==AURA_CLEAVING_STRIKES
+                and state.groundActive
+                and state.location==LOC_OUTSIDE_EMPTY
+                and state.groundStart
+                and (now-state.groundStart)>=INIT_IGNORE_WINDOW
+            then
+                state.lastBenefitClearAt=nil
+                OnReenteredGround("readable 188290 SET")
+                return
+            end
+
+            if readableAuraSpellID~=nil
+                and readableAuraSpellID~=AURA_CLEAVING_STRIKES
+            then
+                state.lastBenefitClearAt=nil
+                return
+            end
+
+            state.benefitObserved=true
+            local clearAt=state.lastBenefitClearAt
+            state.lastBenefitClearAt=nil
+
+            if clearAt and (now-clearAt)>=0 and (now-clearAt)<=0.08 then
+                OnBenefitRollover(clearAt)
+                return
+            end
+        end)
+    end
+
+    if type(item.OnUnitAuraUpdatedEvent)=="function" then
+        hooksecurefunc(item,"OnUnitAuraUpdatedEvent",function(self)
+            if not IsHookedDnDItem(self) then return end
+            if not state.groundActive or state.location==LOC_INSIDE then return end
+
+            -- The trace shows the genuine fast re-entry UPDATE arriving in a
+            -- later aura pass (mutationOpen=false). Ignore only an UPDATE that
+            -- occurs inside the same CLEAR/SET processing pass.
+            if mutationOpen then
+                Debug("Ignore same-pass CDM UPDATED")
+                return
+            end
+
+            OnReenteredGround("independent CDM UPDATED")
+        end)
+    end
+
     return true
 end
 local function ScanBuffViewer()
